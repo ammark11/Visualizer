@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log Data Visualizer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f4f8; margin: 0; padding: 0; }
+    .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); margin-top: 20px; }
+    h1 { text-align: center; color: #1e3a8a; margin-bottom: 20px; }
+    input[type="file"] { display: block; margin: 10px auto; padding: 10px; border: 1px solid #ccc; border-radius: 6px; background-color: #e0f2fe; cursor: pointer; }
+    .filters, .actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 15px 0; }
+    button { padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; }
+    button:hover { background-color: #2563eb; }
+    .chart-container { position: relative; height: 400px; margin: 20px 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; overflow-x: auto; display: block; }
+    th, td { padding: 10px; border: 1px solid #ddd; text-align: center; white-space: nowrap; }
+    th { background-color: #1e3a8a; color: white; cursor: pointer; }
+    tr:nth-child(even) { background-color: #f9fafb; }
+    tr:hover { background-color: #e0f2fe; }
+    .search-bar { text-align: center; margin: 10px 0; }
+    input[type="text"] { padding: 8px; width: 200px; border: 1px solid #ccc; border-radius: 6px; }
+    .summary { display: flex; justify-content: space-around; background: #f1f5f9; padding: 10px; border-radius: 8px; }
+    .dark-mode { background-color: #1f2937; color: white; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Log Data Visualizer & Analyzer</h1>
+    <input type="file" id="fileInput" accept=".csv">
+
+    <div class="actions">
+      <button onclick="toggleDarkMode()">Toggle Dark Mode</button>
+      <button onclick="exportCSV()">Export Data as CSV</button>
+    </div>
+
+    <div class="filters">
+      <button onclick="filterData('All')">All Logs</button>
+      <button onclick="filterData('Call')">Call Logs</button>
+      <button onclick="filterData('SMS')">SMS Logs</button>
+      <button onclick="filterData('Data')">Data Logs</button>
+      <button onclick="filterData('Unknown')">Unknown Logs</button>
+    </div>
+
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="Search..." onkeyup="searchTable()">
+    </div>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="chart-container">
+      <canvas id="logChart"></canvas>
+    </div>
+
+    <table id="dataTable"></table>
+  </div>
+
+  <script>
+    let rawData = [];
+    let logChart = null;
+    let darkMode = false;
+
+    document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+
+    function toggleDarkMode() {
+      darkMode = !darkMode;
+      document.body.classList.toggle('dark-mode', darkMode);
+    }
+
+    function exportCSV() {
+      const csvContent = rawData.map(row => Object.values(row).join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "exported_data.csv";
+      link.click();
+    }
+
+    function categorizeLog(message, protocol) {
+      message = message.toLowerCase();
+      protocol = protocol.toLowerCase();
+      if (message.includes('paging') || message.includes('context release')) return 'Call';
+      if (message.includes('nas transport') || message.includes('initial ue message')) return 'SMS';
+      if (protocol.includes('s1ap') && message.includes('ue')) return 'Data';
+      return 'Unknown';
+    }
+
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const csv = e.target.result;
+        const rows = csv.split('\n').map(row => row.split(','));
+        const headers = rows[0];
+        rawData = rows.slice(1).map(row => {
+          const item = headers.reduce((obj, header, index) => {
+            obj[header.trim()] = row[index]?.trim();
+            return obj;
+          }, {});
+          item.LogType = categorizeLog(item['Message Type'] || '', item['Protocol'] || '');
+          return item;
+        });
+        analyzeData(rawData);
+        renderTable(rawData);
+        showSummary(rawData);
+      };
+      reader.readAsText(file);
+    }
+
+    function analyzeData(data) {
+      const logTypeCounts = data.reduce((acc, item) => {
+        acc[item.LogType] = (acc[item.LogType] || 0) + 1;
+        return acc;
+      }, {});
+
+      const ctx = document.getElementById('logChart').getContext('2d');
+      if (logChart) logChart.destroy();
+      logChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(logTypeCounts),
+          datasets: [{
+            label: 'Log Type Distribution',
+            data: Object.values(logTypeCounts),
+            backgroundColor: ['#4caf50', '#2196f3', '#ff9800', '#9e9e9e'],
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: { x: { title: { display: true, text: 'Log Types' } }, y: { beginAtZero: true, title: { display: true, text: 'Count' } } }
+        }
+      });
+    }
+
+    function renderTable(data) {
+      const table = document.getElementById('dataTable');
+      table.innerHTML = '';
+      if (data.length === 0) return;
+
+      const headers = Object.keys(data[0]).map(header => header === 'Status' ? 'LogType' : header);
+      const headerRow = `<tr>${headers.map(header => `<th onclick="sortTable('${header}')">${header}</th>`).join('')}</tr>`;
+      const rows = data.map(item => `<tr>${headers.map(header => `<td>${item[header] || ''}</td>`).join('')}</tr>`).join('');
+      table.innerHTML = headerRow + rows;
+    }
+
+    function searchTable() {
+      const searchInput = document.getElementById('searchInput').value.toLowerCase();
+      const filteredData = rawData.filter(item => Object.values(item).some(value => value.toLowerCase().includes(searchInput)));
+      renderTable(filteredData);
+    }
+
+    function filterData(type) {
+      const filteredData = type === 'All' ? rawData : rawData.filter(item => item.LogType === type);
+      analyzeData(filteredData);
+      renderTable(filteredData);
+      showSummary(filteredData);
+    }
+
+    function showSummary(data) {
+      const totalLogs = data.length;
+      const uniqueProtocols = [...new Set(data.map(item => item.Protocol))].length;
+      document.getElementById('summary').innerHTML = 
+        `<div><strong>Total Logs:</strong> ${totalLogs}</div>` +
+        `<div><strong>Unique Protocols:</strong> ${uniqueProtocols}</div>`;
+    }
+  </script>
+</body>
+</html>
