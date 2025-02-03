@@ -23,6 +23,9 @@
     input[type="text"] { padding: 8px; width: 200px; border: 1px solid #ccc; border-radius: 6px; }
     .summary { display: flex; justify-content: space-around; background: #f1f5f9; padding: 10px; border-radius: 8px; flex-wrap: wrap; gap: 10px; }
     .dark-mode { background-color: #1f2937; color: white; }
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+    .imsi-table { margin-top: 20px; max-height: 300px; overflow-y: auto; }
+    .imsi-table table { width: 100%; display: table; }
   </style>
 </head>
 <body>
@@ -49,8 +52,18 @@
 
     <div class="summary" id="summary"></div>
 
-    <div class="chart-container">
-      <canvas id="logChart"></canvas>
+    <div class="chart-grid">
+      <div class="chart-container">
+        <canvas id="logChart"></canvas>
+      </div>
+      <div class="chart-container">
+        <canvas id="imsiChart"></canvas>
+      </div>
+    </div>
+
+    <div class="imsi-table">
+      <h3>IMSI Analysis Across Files</h3>
+      <table id="imsiAnalysisTable"></table>
     </div>
 
     <table id="dataTable"></table>
@@ -59,7 +72,9 @@
   <script>
     let rawData = [];
     let logChart = null;
+    let imsiChart = null;
     let darkMode = false;
+    let fileDataMap = new Map(); // Store data from each file separately
 
     document.getElementById('fileInput').addEventListener('change', handleFileUpload);
 
@@ -88,7 +103,8 @@
 
     function handleFileUpload(event) {
       const files = event.target.files;
-      rawData = []; // Reset data when new files are uploaded
+      rawData = [];
+      fileDataMap.clear();
       
       let filesProcessed = 0;
       
@@ -105,17 +121,19 @@
               return obj;
             }, {});
             item.LogType = categorizeLog(item['Message Type'] || '', item['Protocol'] || '');
+            item.SourceFile = file.name;
             return item;
           });
           
+          fileDataMap.set(file.name, fileData);
           rawData = [...rawData, ...fileData];
           
           filesProcessed++;
           if (filesProcessed === files.length) {
-            // Only update visualizations after all files are processed
             analyzeData(rawData);
             renderTable(rawData);
             showSummary(rawData);
+            analyzeIMSIs();
           }
         };
         reader.readAsText(file);
@@ -181,6 +199,82 @@
         `<div><strong>Total Logs:</strong> ${totalLogs}</div>` +
         `<div><strong>Unique IMSIs:</strong> ${uniqueIMSIs}</div>` +
         `<div><strong>Unique Protocols:</strong> ${uniqueProtocols}</div>`;
+    }
+
+    function analyzeIMSIs() {
+      // Create a map of IMSI to file occurrences
+      const imsiAnalysis = new Map();
+      
+      for (const [fileName, fileData] of fileDataMap) {
+        const imsis = new Set(fileData.map(item => item.IMSI).filter(Boolean));
+        imsis.forEach(imsi => {
+          if (!imsiAnalysis.has(imsi)) {
+            imsiAnalysis.set(imsi, new Set());
+          }
+          imsiAnalysis.get(imsi).add(fileName);
+        });
+      }
+
+      // Create data for visualization
+      const imsiOccurrences = Array.from(imsiAnalysis.entries())
+        .map(([imsi, files]) => ({
+          imsi,
+          fileCount: files.size,
+          files: Array.from(files)
+        }))
+        .sort((a, b) => b.fileCount - a.fileCount);
+
+      // Render IMSI analysis table
+      const analysisTable = document.getElementById('imsiAnalysisTable');
+      analysisTable.innerHTML = `
+        <tr>
+          <th>IMSI</th>
+          <th>Occurrence Count</th>
+          <th>Files</th>
+        </tr>
+        ${imsiOccurrences.map(item => `
+          <tr>
+            <td>${item.imsi}</td>
+            <td>${item.fileCount}</td>
+            <td>${item.files.join(', ')}</td>
+          </tr>
+        `).join('')}
+      `;
+
+      // Create IMSI distribution chart
+      const ctx = document.getElementById('imsiChart').getContext('2d');
+      if (imsiChart) imsiChart.destroy();
+
+      const occurrenceCounts = {};
+      imsiOccurrences.forEach(item => {
+        occurrenceCounts[item.fileCount] = (occurrenceCounts[item.fileCount] || 0) + 1;
+      });
+
+      imsiChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(occurrenceCounts).map(count => `${count} File${count > 1 ? 's' : ''}`),
+          datasets: [{
+            label: 'IMSIs by File Occurrence',
+            data: Object.values(occurrenceCounts),
+            backgroundColor: '#3b82f6',
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: {
+              display: true,
+              text: 'IMSI Distribution Across Files'
+            }
+          },
+          scales: {
+            x: { title: { display: true, text: 'Number of Files' } },
+            y: { beginAtZero: true, title: { display: true, text: 'Number of IMSIs' } }
+          }
+        }
+      });
     }
   </script>
 </body>
