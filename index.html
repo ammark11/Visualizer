@@ -21,14 +21,14 @@
     tr:hover { background-color: #e0f2fe; }
     .search-bar { text-align: center; margin: 10px 0; }
     input[type="text"] { padding: 8px; width: 200px; border: 1px solid #ccc; border-radius: 6px; }
-    .summary { display: flex; justify-content: space-around; background: #f1f5f9; padding: 10px; border-radius: 8px; }
+    .summary { display: flex; justify-content: space-around; background: #f1f5f9; padding: 10px; border-radius: 8px; flex-wrap: wrap; gap: 10px; }
     .dark-mode { background-color: #1f2937; color: white; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>📊 Log Data Visualizer & Analyzer</h1>
-    <input type="file" id="fileInput" accept=".csv">
+    <input type="file" id="fileInput" accept=".csv" multiple>
 
     <div class="actions">
       <button onclick="toggleDarkMode()">Toggle Dark Mode</button>
@@ -87,25 +87,39 @@
     }
 
     function handleFileUpload(event) {
-      const file = event.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const csv = e.target.result;
-        const rows = csv.split('\n').map(row => row.split(','));
-        const headers = rows[0];
-        rawData = rows.slice(1).map(row => {
-          const item = headers.reduce((obj, header, index) => {
-            obj[header.trim()] = row[index]?.trim();
-            return obj;
-          }, {});
-          item.LogType = categorizeLog(item['Message Type'] || '', item['Protocol'] || '');
-          return item;
-        });
-        analyzeData(rawData);
-        renderTable(rawData);
-        showSummary(rawData);
-      };
-      reader.readAsText(file);
+      const files = event.target.files;
+      rawData = []; // Reset data when new files are uploaded
+      
+      let filesProcessed = 0;
+      
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const csv = e.target.result;
+          const rows = csv.split('\n').map(row => row.split(','));
+          const headers = rows[0];
+          
+          const fileData = rows.slice(1).map(row => {
+            const item = headers.reduce((obj, header, index) => {
+              obj[header.trim()] = row[index]?.trim();
+              return obj;
+            }, {});
+            item.LogType = categorizeLog(item['Message Type'] || '', item['Protocol'] || '');
+            return item;
+          });
+          
+          rawData = [...rawData, ...fileData];
+          
+          filesProcessed++;
+          if (filesProcessed === files.length) {
+            // Only update visualizations after all files are processed
+            analyzeData(rawData);
+            renderTable(rawData);
+            showSummary(rawData);
+          }
+        };
+        reader.readAsText(file);
+      });
     }
 
     function analyzeData(data) {
@@ -161,8 +175,11 @@
     function showSummary(data) {
       const totalLogs = data.length;
       const uniqueProtocols = [...new Set(data.map(item => item.Protocol))].length;
+      const uniqueIMSIs = [...new Set(data.map(item => item.IMSI).filter(Boolean))].length;
+      
       document.getElementById('summary').innerHTML = 
         `<div><strong>Total Logs:</strong> ${totalLogs}</div>` +
+        `<div><strong>Unique IMSIs:</strong> ${uniqueIMSIs}</div>` +
         `<div><strong>Unique Protocols:</strong> ${uniqueProtocols}</div>`;
     }
   </script>
